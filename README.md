@@ -8,5 +8,5 @@ Make sure having SDL3 installed. CEF will automatically download itself.
 1. cd $project_dir
 2. mkdir build
 3. cd build
-4. cmake .. && cmake --build .
+4. cmake -G "Unix Makefiles" -DCMAKE_BUILD_TYPE=Release ..
 5. make -j4 sdlcef  
