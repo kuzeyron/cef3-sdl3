@@ -3,6 +3,8 @@
 #include <sstream>
 
 #include <SDL.h>
+#include <SDL_properties.h>
+#include <SDL_render.h>
 
 #include <cef_app.h>
 #include <cef_client.h>
@@ -11,8 +13,6 @@
 #include <cef_load_handler.h>
 #include <wrapper/cef_helpers.h>
 
-#include "sdl_keyboard_utils.h"
-
 class RenderHandler :
     public CefRenderHandler
 {
@@ -20,30 +20,23 @@ public:
     RenderHandler(SDL_Renderer * renderer, int w, int h) :
         width(w),
         height(h),
-        renderer(renderer)
-    {
+        renderer(renderer) {
         texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_UNKNOWN, SDL_TEXTUREACCESS_STREAMING, w, h);
     }
 
-    ~RenderHandler()
-    {
-        if (texture)
-        {
+    ~RenderHandler() {
+        if (texture) {
             SDL_DestroyTexture(texture);
         }
         renderer = nullptr;
     }
 
-    bool GetViewRect(CefRefPtr<CefBrowser> browser, CefRect &rect)
-    {
+    virtual void GetViewRect(CefRefPtr<CefBrowser> browser, CefRect& rect) override {
         rect = CefRect(0, 0, width, height);
-        return true;
     }
 
-    void OnPaint(CefRefPtr<CefBrowser> browser, PaintElementType type, const RectList &dirtyRects, const void * buffer, int w, int h)
-    {
-        if (texture)
-        {
+    void OnPaint(CefRefPtr<CefBrowser> browser, PaintElementType type, const RectList &dirtyRects, const void * buffer, int w, int h) {
+        if (texture) {
             unsigned char * texture_data = NULL;
             int texture_pitch = 0;
 
@@ -53,10 +46,8 @@ public:
         }
     }
 
-    void resize(int w, int h)
-    {
-        if (texture)
-        {
+    void resize(int w, int h) {
+        if (texture) {
             SDL_DestroyTexture(texture);
         }
 
@@ -65,9 +56,8 @@ public:
         height = h;
     }
 
-    void render()
-    {
-        SDL_RenderCopy(renderer, texture, NULL, NULL);
+    void render() {
+        SDL_RenderTexture(renderer, texture, NULL, NULL);
     }
 
 private:
@@ -88,43 +78,36 @@ class BrowserClient :
 public:
     BrowserClient(CefRefPtr<CefRenderHandler> ptr) :
         handler(ptr)
-    {
-    }
+    {}
 
-    virtual CefRefPtr<CefLifeSpanHandler> GetLifeSpanHandler()
-    {
+    virtual CefRefPtr<CefLifeSpanHandler> GetLifeSpanHandler() {
         return this;
     }
 
-    virtual CefRefPtr<CefLoadHandler> GetLoadHandler()
-    {
+    virtual CefRefPtr<CefLoadHandler> GetLoadHandler() {
         return this;
     }
 
-    virtual CefRefPtr<CefRenderHandler> GetRenderHandler()
-    {
+    virtual CefRefPtr<CefRenderHandler> GetRenderHandler() {
         return handler;
     }
 
     // CefLifeSpanHandler methods.
-    void OnAfterCreated(CefRefPtr<CefBrowser> browser)
-    {
+    void OnAfterCreated(CefRefPtr<CefBrowser> browser) {
         // Must be executed on the UI thread.
         CEF_REQUIRE_UI_THREAD();
 
         browser_id = browser->GetIdentifier();
     }
 
-    bool DoClose(CefRefPtr<CefBrowser> browser)
-    {
+    bool DoClose(CefRefPtr<CefBrowser> browser) {
         // Must be executed on the UI thread.
         CEF_REQUIRE_UI_THREAD();
 
         // Closing the main window requires special handling. See the DoClose()
         // documentation in the CEF header for a detailed description of this
         // process.
-        if (browser->GetIdentifier() == browser_id)
-        {
+        if (browser->GetIdentifier() == browser_id) {
             // Set a flag to indicate that the window close should be allowed.
             closing = true;
         }
@@ -134,39 +117,39 @@ public:
         return false;
     }
 
-    void OnBeforeClose(CefRefPtr<CefBrowser> browser)
-    {
-    }
+    void OnBeforeClose(CefRefPtr<CefBrowser> browser) {}
 
-    void OnLoadEnd(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, int httpStatusCode)
-    {
+    void OnLoadEnd(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, int httpStatusCode) {
         std::cout << "OnLoadEnd(" << httpStatusCode << ")" << std::endl;
         loaded = true;
     }
 
-    bool OnLoadError(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, CefLoadHandler::ErrorCode errorCode, const CefString & failedUrl, CefString & errorText)
+    virtual void OnLoadError(CefRefPtr<CefBrowser> browser,
+                             CefRefPtr<CefFrame> frame,
+                             cef_errorcode_t errorCode, // Correct type
+                             const CefString& errorText, // Correct parameter order and const
+                             const CefString& failedUrl) override // Correct parameter order and const, plus 'override'
     {
-        std::cout << "OnLoadError()" << std::endl;
-        loaded = true;
+        std::cout << "OnLoadError(): Error Code: " << errorCode
+                  << ", Error Text: " << errorText.ToString()
+                  << ", Failed URL: " << failedUrl.ToString() << std::endl;
+        loaded = true; // Assuming 'loaded' is a member variable
     }
-
-    void OnLoadingStateChange(CefRefPtr<CefBrowser> browser, bool isLoading, bool canGoBack, bool canGoForward)
-    {
+    void OnLoadingStateChange(CefRefPtr<CefBrowser> browser, bool isLoading, bool canGoBack, bool canGoForward) {
         std::cout << "OnLoadingStateChange()" << std::endl;
     }
 
-    void OnLoadStart(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame)
-    {
+     virtual void OnLoadStart(CefRefPtr<CefBrowser> browser,
+                             CefRefPtr<CefFrame> frame,
+                             cef_transition_type_t transition_type) override {
         std::cout << "OnLoadStart()" << std::endl;
     }
 
-    bool closeAllowed() const
-    {
+    bool closeAllowed() const {
         return closing;
     }
 
-    bool isLoaded() const
-    {
+    bool isLoaded() const {
         return loaded;
     }
 
@@ -179,42 +162,37 @@ private:
     IMPLEMENT_REFCOUNTING(BrowserClient);
 };
 
-CefBrowserHost::MouseButtonType translateMouseButton(SDL_MouseButtonEvent const &e)
-{
-    CefBrowserHost::MouseButtonType result;
-    switch (e.button)
-    {
+CefBrowserHost::MouseButtonType translateMouseButton(const SDL_MouseButtonEvent& sdlButton) {
+    CefBrowserHost::MouseButtonType result = MBT_LEFT;
+
+    switch (sdlButton.button) {
         case SDL_BUTTON_LEFT:
-        case SDL_BUTTON_X1:
             result = MBT_LEFT;
             break;
-
         case SDL_BUTTON_MIDDLE:
             result = MBT_MIDDLE;
             break;
-
         case SDL_BUTTON_RIGHT:
-        case SDL_BUTTON_X2:
             result = MBT_RIGHT;
+            break;
+        default:
+            result = MBT_LEFT;
             break;
     }
     return result;
 }
 
-int main(int argc, char * argv[])
-{
+int main(int argc, char * argv[]) {
     CefMainArgs args;
 
     {
         int result = CefExecuteProcess(args, nullptr, nullptr);
         // checkout CefApp, derive it and set it as second parameter, for more control on
         // command args and resources.
-        if (result >= 0) // child proccess has endend, so exit.
-        {
+        if (result >= 0) {
             return result;
         }
-        else if (result == -1)
-        {
+        else if (result == -1) {
             // we are here in the father proccess.
         }
     }
@@ -243,16 +221,14 @@ int main(int argc, char * argv[])
         bool result = CefInitialize(args, settings, nullptr, nullptr);
         // CefInitialize creates a sub-proccess and executes the same executeable, as calling CefInitialize, if not set different in settings.browser_subprocess_path
         // if you create an extra program just for the childproccess you only have to call CefExecuteProcess(...) in it.
-        if (!result)
-        {
+        if (!result) {
             // handle error
             return -1;
         }
     }
 
     //Initialize SDL
-    if (SDL_Init(SDL_INIT_VIDEO) < 0)
-    {
+    if (SDL_Init(SDL_INIT_VIDEO) != 0) {
         std::cerr << "SDL could not initialize! SDL_Error: " << SDL_GetError() << std::endl;
         return 1;
     }
@@ -260,12 +236,15 @@ int main(int argc, char * argv[])
     int width = 800;
     int height = 600;
 
-    auto window = SDL_CreateWindow("Render CEF with SDL", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, width, height, SDL_WINDOW_RESIZABLE);
-    if (window)
-    {
-        auto renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
-        if (renderer)
-        {
+    auto window = SDL_CreateWindow(
+        "Render CEF with SDL",
+        width,
+        height,
+        SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY
+    );
+    if (window) {
+        auto renderer = SDL_CreateRenderer(window, nullptr);
+        if (renderer) {
             SDL_Event e;
 
             CefRefPtr<RenderHandler> renderHandler = new RenderHandler(renderer, width, height);
@@ -280,11 +259,11 @@ int main(int argc, char * argv[])
 
                 // browserSettings.windowless_frame_rate = 60; // 30 is default
 
-                window_info.SetAsWindowless(NULL, false); // false means no transparency (site background colour)
+                window_info.SetAsWindowless(0); // false means no transparency (site background colour)
 
                 browserClient = new BrowserClient(renderHandler);
 
-                browser = CefBrowserHost::CreateBrowserSync(window_info, browserClient.get(), "http://www.google.com", browserSettings, nullptr);
+                browser = CefBrowserHost::CreateBrowserSync(window_info, browserClient.get(), "https://www.google.com", browserSettings, nullptr, nullptr);
 
                 // inject user-input by calling - non-trivial for non-windows - checkout the cefclient source and the platform specific cpp, like cefclient_osr_widget_gtk.cpp for linux
                 // browser->GetHost()->SendKeyEvent(...);
@@ -295,23 +274,19 @@ int main(int argc, char * argv[])
 
             bool shutdown = false;
             bool js_executed = false;
-            while (!browserClient->closeAllowed())
-            {
+            while (!browserClient->closeAllowed()) {
                 // send events to browser
-                while (!shutdown && SDL_PollEvent(&e) != 0)
-                {
-                    switch (e.type)
-                    {
-                        case SDL_QUIT:
+                while (!shutdown && SDL_PollEvent(&e) != 0) {
+                    switch (e.type) {
+                        case SDL_EVENT_QUIT:
                             shutdown = true;
                             browser->GetHost()->CloseBrowser(false);
                             break;
 
-                        case SDL_KEYDOWN:
-                            {
+                        case SDL_EVENT_KEY_DOWN: {
                                 CefKeyEvent event;
-                                event.modifiers = getKeyboardModifiers(e.key.keysym.mod);
-                                event.windows_key_code = getWindowsKeyCode(e.key.keysym);
+                                event.modifiers = e.key.mod;
+                                event.windows_key_code = e.key.key;
 
                                 event.type = KEYEVENT_RAWKEYDOWN;
                                 browser->GetHost()->SendKeyEvent(event);
@@ -321,11 +296,10 @@ int main(int argc, char * argv[])
                             }
                             break;
 
-                        case SDL_KEYUP:
-                            {
+                        case SDL_EVENT_KEY_UP: {
                                 CefKeyEvent event;
-                                event.modifiers = getKeyboardModifiers(e.key.keysym.mod);
-                                event.windows_key_code = getWindowsKeyCode(e.key.keysym);
+                                event.modifiers = e.key.mod;
+                                event.windows_key_code = e.key.key;
 
                                 event.type = KEYEVENT_KEYUP;
 
@@ -333,43 +307,35 @@ int main(int argc, char * argv[])
                             }
                             break;
 
-                        case SDL_WINDOWEVENT:
-                            switch (e.window.event)
-                            {
-                                case SDL_WINDOWEVENT_SIZE_CHANGED:
-                                    renderHandler->resize(e.window.data1, e.window.data2);
-                                    browser->GetHost()->WasResized();
-                                    break;
-
-                                case SDL_WINDOWEVENT_FOCUS_GAINED:
-                                    browser->GetHost()->SetFocus(true);
-                                    break;
-
-                                case SDL_WINDOWEVENT_FOCUS_LOST:
-                                    browser->GetHost()->SetFocus(false);
-                                    break;
-
-                                case SDL_WINDOWEVENT_HIDDEN:
-                                case SDL_WINDOWEVENT_MINIMIZED:
-                                    browser->GetHost()->SetWindowVisibility(false);
-                                    browser->GetHost()->WasHidden(true);
-                                    break;
-
-                                case SDL_WINDOWEVENT_SHOWN:
-                                case SDL_WINDOWEVENT_RESTORED:
-                                    browser->GetHost()->SetWindowVisibility(true);
-                                    browser->GetHost()->WasHidden(false);
-                                    break;
-
-                                case SDL_WINDOWEVENT_CLOSE:
-                                    e.type = SDL_QUIT;
-                                    SDL_PushEvent(&e);
-                                    break;
-                            }
+                        case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
+                            renderHandler->resize(e.window.data1, e.window.data2);
+                            browser->GetHost()->WasResized();
                             break;
 
-                        case SDL_MOUSEMOTION:
-                            {
+                        case SDL_EVENT_WINDOW_FOCUS_GAINED:
+                            browser->GetHost()->SetFocus(true);
+                            break;
+
+                        case SDL_EVENT_WINDOW_FOCUS_LOST:
+                            browser->GetHost()->SetFocus(false);
+                            break;
+
+                        case SDL_EVENT_WINDOW_HIDDEN:
+                        case SDL_EVENT_WINDOW_MINIMIZED:
+                            browser->GetHost()->WasHidden(true);
+                            break;
+
+                        case SDL_EVENT_WINDOW_SHOWN:
+                        case SDL_EVENT_WINDOW_RESTORED:
+                            browser->GetHost()->WasHidden(false);
+                            break;
+
+                        case SDL_EVENT_WINDOW_CLOSE_REQUESTED:
+                            e.type = SDL_EVENT_QUIT;
+                            SDL_PushEvent(&e);
+                            break;
+
+                        case SDL_EVENT_MOUSE_MOTION: {
                                 CefMouseEvent event;
                                 event.x = e.motion.x;
                                 event.y = e.motion.y;
@@ -378,8 +344,7 @@ int main(int argc, char * argv[])
                             }
                             break;
 
-                        case SDL_MOUSEBUTTONUP:
-                            {
+                        case SDL_EVENT_MOUSE_BUTTON_UP: {
                                 CefMouseEvent event;
                                 event.x = e.button.x;
                                 event.y = e.button.y;
@@ -388,8 +353,7 @@ int main(int argc, char * argv[])
                             }
                             break;
 
-                        case SDL_MOUSEBUTTONDOWN:
-                            {
+                        case SDL_EVENT_MOUSE_BUTTON_DOWN: {
                                 CefMouseEvent event;
                                 event.x = e.button.x;
                                 event.y = e.button.y;
@@ -398,17 +362,14 @@ int main(int argc, char * argv[])
                             }
                             break;
 
-                        case SDL_MOUSEWHEEL:
-                            {
+                        case SDL_EVENT_MOUSE_WHEEL: {
                                 int delta_x = e.wheel.x;
                                 int delta_y = e.wheel.y;
 
-                                if (SDL_MOUSEWHEEL_FLIPPED == e.wheel.direction)
-                                {
+                                if (SDL_MOUSEWHEEL_FLIPPED == e.wheel.direction) {
                                     delta_y *= -1;
                                 }
-                                else
-                                {
+                                else {
                                     delta_x *= -1;
                                 }
 
@@ -419,8 +380,7 @@ int main(int argc, char * argv[])
                     }
                 }
 
-                if (!js_executed && browserClient->isLoaded())
-                {
+                if (!js_executed && browserClient->isLoaded()) {
                     js_executed = true;
 
                     CefRefPtr<CefFrame> frame = browser->GetMainFrame();

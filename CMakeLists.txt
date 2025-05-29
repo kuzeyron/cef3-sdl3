@@ -1,88 +1,92 @@
-cmake_minimum_required(VERSION 2.8)
+# Copyright (c) 2016 The Chromium Embedded Framework Authors. All rights
+# reserved. Use of this source code is governed by a BSD-style license that
+# can be found in the LICENSE file.
 
-set(PROJECT_NAME "cef3-sdl2")
+# See the included README.md file for usage instructions.
+set(CMAKE_CXX_FLAGS_RELEASE_INIT "-Wall")
 
-# Overwrite default configurations RelWithDebInfo-- & MinSizeRel--
-set(CMAKE_CONFIGURATION_TYPES Debug Release CACHE TYPE INTERNAL FORCE)
+cmake_minimum_required(VERSION 3.19)
 
-project(${PROJECT_NAME})
+# Only generate Debug and Release configuration types.
+set(CMAKE_CONFIGURATION_TYPES Debug Release)
+# set (CMAKE_CXX_STANDARD 11) ### FORBIDDEN TO USE
 
-if (MSVC)
-    # 0x0501 for Windows XP
-    # 0x0502 for Windows Server 2003
-    # 0x0600 for Windows Vista
-    # 0x0601 for Windows 7
-    # 0x0602 for Windows 8
-    # 0x0603 for Windows 8.1
-    #
-    # @see http://msdn.microsoft.com/en-us/library/6sehtctf.aspx
-    add_definitions(
-        -D_WIN32_WINNT=0x0602
-        -DNOMINMAX
-        -DWIN32_LEAN_AND_MEAN
-        -D_CRT_SECURE_NO_WARNINGS
-    )
+# Project name.
+project(sdlcef)
 
-    # MD : MultiThread DLL
-    # MT : MultiThread (static)
-    string(REPLACE "/MD" "/MT" CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE}")
-    string(REPLACE "/MD" "/MT" CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG}")
-endif ()
+# Use folders in the resulting project files.
+set_property(GLOBAL PROPERTY OS_FOLDERS ON)
 
-set(EXECUTABLE_OUTPUT_PATH ${CMAKE_SOURCE_DIR}/bin)
-set(LIBRARY_OUTPUT_PATH ${CMAKE_SOURCE_DIR}/bin)
 
-execute_process(COMMAND
-    ${CMAKE_COMMAND} -E remove_directory ${EXECUTABLE_OUTPUT_PATH}
-)
+#
+# CEF configuration.
+#
 
-set(LNK_LIBRARIES
-    "${CMAKE_SOURCE_DIR}/vendor/sdl/lib/x86/SDL2.lib"
-    "${CMAKE_SOURCE_DIR}/vendor/sdl/lib/x86/SDL2main.lib"
-    "${CMAKE_SOURCE_DIR}/vendor/cef/lib/cef_sandbox.lib"
-    "${CMAKE_SOURCE_DIR}/vendor/cef/lib/libcef.lib"
-    "${CMAKE_SOURCE_DIR}/vendor/cef/lib/libcef_dll_wrapper.lib"
-)
+# Specify the CEF distribution version.
+set(CEF_VERSION "136.1.6+g1ac1b14+chromium-136.0.7103.114")
 
-set(COPY_DLL
-    "vendor/sdl/lib/x86/SDL2.dll"
+# Determine the platform.
+if("${CMAKE_SYSTEM_NAME}" STREQUAL "Darwin")
+  set(CEF_PLATFORM "macosx64")
+elseif("${CMAKE_SYSTEM_NAME}" STREQUAL "Linux")
+  if(CMAKE_SIZEOF_VOID_P MATCHES 8)
+    set(CEF_PLATFORM "linux64")
+  else()
+    set(CEF_PLATFORM "linux32")
+  endif()
+elseif("${CMAKE_SYSTEM_NAME}" STREQUAL "Windows")
+  if(CMAKE_SIZEOF_VOID_P MATCHES 8)
+    set(CEF_PLATFORM "windows64")
+  else()
+    set(CEF_PLATFORM "windows32")
+  endif()
+endif()
 
-    "vendor/cef/lib/d3dcompiler_43.dll"
-    "vendor/cef/lib/d3dcompiler_47.dll"
-    "vendor/cef/lib/libcef.dll"
-    "vendor/cef/lib/libEGL.dll"
-    "vendor/cef/lib/libGLESv2.dll"
-    "vendor/cef/lib/natives_blob.bin"
-    "vendor/cef/lib/snapshot_blob.bin"
-    "vendor/cef/lib/widevinecdmadapter.dll"
-    "vendor/cef/lib/wow_helper.exe"
-)
+# Add this project's cmake/ directory to the module path.
+set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
-include_directories(
-    include
-    vendor/sdl/include
-    vendor/cef
-    vendor/cef/include
-)
+# Download and extract the CEF binary distribution (executes DownloadCEF.cmake).
+include(DownloadCEF)
+DownloadCEF("${CEF_PLATFORM}" "${CEF_VERSION}" "${CMAKE_SOURCE_DIR}/third_party/cef")
+message(STATUS "CEF_ROOT is: ${CEF_ROOT}")
 
-add_executable(${PROJECT_NAME}
-    src/main.cpp
-)
+# Add the CEF binary distribution's cmake/ directory to the module path.
+set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CEF_ROOT}/cmake")
 
-target_link_libraries(${PROJECT_NAME}
-    ${LNK_LIBRARIES}
-)
+# Load the CEF configuration (executes FindCEF.cmake).
+find_package(CEF REQUIRED)
 
-foreach(dll ${COPY_DLL})
-    get_filename_component(dll_filename ${dll} NAME)
+# include folder for the project
+# include_directories(${CMAKE_SOURCE_DIR}/include)
 
-    add_custom_command(TARGET ${PROJECT_NAME}
-        POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_SOURCE_DIR}/${dll}" "${EXECUTABLE_OUTPUT_PATH}/$<CONFIGURATION>/${dll_filename}"
-    )
-endforeach()
+#
+# Target configuration.
+#
 
-add_custom_command(TARGET ${PROJECT_NAME}
-    POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/vendor/cef/Resources" "${EXECUTABLE_OUTPUT_PATH}/$<CONFIGURATION>"
-)
+# Include the libcef_dll_wrapper target (executes libcef_dll/CMakeLists.txt).
+add_subdirectory(${CEF_LIBCEF_DLL_WRAPPER_PATH} libcef_dll_wrapper)
+
+# Allow includes relative to the current source directory.
+include_directories(${CMAKE_CURRENT_SOURCE_DIR})
+
+# Configure building of the examples.
+option(WITH_EXAMPLES "Enable or disable building of examples." OFF)
+if(WITH_EXAMPLES)
+  # Include example application targets.
+  add_subdirectory(examples)
+endif()
+
+# TODO: Include other application targets here.
+
+# Include the SDL target
+add_subdirectory(src)
+
+# Display configuration settings.
+PRINT_CEF_CONFIG()
+
+if(NOT WITH_EXAMPLES)
+  message(STATUS "")
+  message(STATUS "NOTE: Targets from the examples folder are not included.")
+  message(STATUS "Add -DWITH_EXAMPLES=On to the CMake command-line to include them.")
+  message(STATUS "")
+endif()
