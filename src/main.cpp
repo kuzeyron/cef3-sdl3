@@ -279,11 +279,10 @@ int main(int argc, char * argv[]) {
     }
 
     // Initialize SDL
-    if (SDL_Init(SDL_INIT_VIDEO) != 0) {
-        std::cerr << "SDL could not initialize! SDL_Error: " << SDL_GetError() << std::endl;
-        // CefShutdown(); // Ensure CEF is shut down even if SDL fails
-        // return 1;
-        /* THIS IS WRONG */
+    if (!SDL_Init(SDL_INIT_VIDEO)) {
+        SDL_Log("Couldn't initialize SDL: %s", SDL_GetError());
+        CefShutdown(); // Ensure CEF is shut down even if SDL fails
+        return SDL_APP_FAILURE;
     }
 
     int width = 800;
