@@ -4,7 +4,7 @@
 #include <cef_load_handler.h>
 #include <cef_render_handler.h>
 #include <iostream>
-#include <SDL.h>
+#include <SDL3/SDL.h>
 #include <sstream>
 #include <stdio.h>
 #include <wrapper/cef_helpers.h>
@@ -48,7 +48,10 @@ public:
                          int w,
                          int h) override {
         // This method is called when the browser needs to redraw
-        std::cout << "OnPaint called! Type: " << type << ", Buffer size: " << w * h * 4 << " bytes." << std::endl;
+
+        // Debug messages:
+        // std::cout << "OnPaint called! Type: " << type << ", Buffer size: " << w * h * 4 << " bytes." << std::endl;
+
         if (texture) {
             unsigned char * texture_data = NULL;
             int texture_pitch = 0;
@@ -194,14 +197,15 @@ public:
         // We can add or modify command-line switches here.
         std::cout << "OnBeforeCommandLineProcessing for process type: " << process_type.ToString() << std::endl;
 
-        // Add flags to disable GPU and software rasterizer for debugging hangs.
-        // These are common flags used to troubleshoot rendering issues.
-        command_line->AppendSwitch("disable-gpu");
-        command_line->AppendSwitch("disable-software-rasterizer");
+        // If the system is locking itself:
+        // command_line->AppendSwitch("disable-gpu");
 
-        // Optionally, you might want to enable logging to a file for more detailed debugging.
-        // command_line->AppendSwitchWithValue("log-file", "cef_debug.log");
-        // command_line->AppendSwitchWithValue("log-severity", "verbose");
+        // Hardware acceleration on x11
+        command_line->AppendSwitchWithValue("use-gl", "desktop");
+
+        // Optionally
+        command_line->AppendSwitchWithValue("log-file", "cef_debug.log");
+        command_line->AppendSwitchWithValue("log-severity", "verbose");
     }
 
 private:
@@ -285,17 +289,17 @@ int main(int argc, char * argv[]) {
         return SDL_APP_FAILURE;
     }
 
-    int width = 800;
-    int height = 600;
+    int width = 950;
+    int height = 750;
 
     // Create an SDL window
     auto window = SDL_CreateWindow(
-        "Render CEF with SDL",
+        "Render CEF with SDL3",
         width,
         height,
         SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY
     );
-
+    SDL_StartTextInput(window);
     if (window) {
         // Create an SDL renderer
         auto renderer = SDL_CreateRenderer(window, nullptr);
@@ -319,7 +323,7 @@ int main(int argc, char * argv[]) {
             CefRefPtr<CefBrowser> browser = CefBrowserHost::CreateBrowserSync(
                 window_info,
                 browserClient.get(),
-                "https://www.google.com", // Initial URL
+                "https://www.youtube.com/watch?v=l8Imtec4ReQ", // Initial URL
                 browserSettings,
                 nullptr,
                 nullptr
@@ -341,49 +345,40 @@ int main(int argc, char * argv[]) {
                             }
                             break;
 
-                        case SDL_EVENT_KEY_DOWN: {
+                        case SDL_EVENT_TEXT_INPUT: {
                             CefKeyEvent event;
-                            event.modifiers = e.key.mod;
-                            event.windows_key_code = e.key.key;
-                            event.type = KEYEVENT_RAWKEYDOWN;
-                            if (browser) browser->GetHost()->SendKeyEvent(event);
-
-                            event.type = KEYEVENT_CHAR;
-                            if (browser) browser->GetHost()->SendKeyEvent(event);
-                            break;
-                        }
-
-                        case SDL_EVENT_KEY_UP: {
-                            CefKeyEvent event;
-                            event.modifiers = e.key.mod;
-                            event.windows_key_code = e.key.key;
-                            event.type = KEYEVENT_KEYUP;
-                            if (browser) browser->GetHost()->SendKeyEvent(event);
+                            event.type = KEYEVENT_CHAR; // Event for a committed character
+                            event.modifiers = 0;
+                            for (int i = 0; e.text.text[i] != '\0'; ++i) {
+                                CefKeyEvent char_event = event; // Copy the base event
+                                char_event.character = e.text.text[i]; // Assign the character byte
+                                browser->GetHost()->SendKeyEvent(char_event);
+                            }
                             break;
                         }
 
                         case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
                             // Update render handler and notify browser of resize
                             renderHandler->resize(e.window.data1, e.window.data2);
-                            if (browser) browser->GetHost()->WasResized();
+                            browser->GetHost()->WasResized();
                             break;
 
                         case SDL_EVENT_WINDOW_FOCUS_GAINED:
-                            if (browser) browser->GetHost()->SetFocus(true);
+                            browser->GetHost()->SetFocus(true);
                             break;
 
                         case SDL_EVENT_WINDOW_FOCUS_LOST:
-                            if (browser) browser->GetHost()->SetFocus(false);
+                            browser->GetHost()->SetFocus(false);
                             break;
 
                         case SDL_EVENT_WINDOW_HIDDEN:
                         case SDL_EVENT_WINDOW_MINIMIZED:
-                            if (browser) browser->GetHost()->WasHidden(true);
+                            browser->GetHost()->WasHidden(true);
                             break;
 
                         case SDL_EVENT_WINDOW_SHOWN:
                         case SDL_EVENT_WINDOW_RESTORED:
-                            if (browser) browser->GetHost()->WasHidden(false);
+                            browser->GetHost()->WasHidden(false);
                             break;
 
                         case SDL_EVENT_WINDOW_CLOSE_REQUESTED:
@@ -396,7 +391,7 @@ int main(int argc, char * argv[]) {
                             CefMouseEvent event;
                             event.x = e.motion.x;
                             event.y = e.motion.y;
-                            if (browser) browser->GetHost()->SendMouseMoveEvent(event, false);
+                            browser->GetHost()->SendMouseMoveEvent(event, false);
                             break;
                         }
 
@@ -404,7 +399,7 @@ int main(int argc, char * argv[]) {
                             CefMouseEvent event;
                             event.x = e.button.x;
                             event.y = e.button.y;
-                            if (browser) browser->GetHost()->SendMouseClickEvent(event, translateMouseButton(e.button), true, 1);
+                            browser->GetHost()->SendMouseClickEvent(event, translateMouseButton(e.button), true, 1);
                             break;
                         }
 
@@ -412,7 +407,7 @@ int main(int argc, char * argv[]) {
                             CefMouseEvent event;
                             event.x = e.button.x;
                             event.y = e.button.y;
-                            if (browser) browser->GetHost()->SendMouseClickEvent(event, translateMouseButton(e.button), false, 1);
+                            browser->GetHost()->SendMouseClickEvent(event, translateMouseButton(e.button), false, 1);
                             break;
                         }
 
@@ -428,7 +423,7 @@ int main(int argc, char * argv[]) {
                             }
 
                             CefMouseEvent event;
-                            if (browser) browser->GetHost()->SendMouseWheelEvent(event, delta_x, delta_y);
+                            browser->GetHost()->SendMouseWheelEvent(event, delta_x, delta_y);
                             break;
                         }
                     }
