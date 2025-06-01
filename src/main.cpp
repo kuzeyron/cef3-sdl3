@@ -11,7 +11,6 @@
 #include <chrono>
 #include <string>
 
-// RenderHandler class for off-screen rendering
 class RenderHandler :
     public CefRenderHandler
 {
@@ -66,14 +65,21 @@ public:
 
     // Resize the internal texture when the window size changes
     void resize(int w, int h) {
+        if (w == width && h == height) {
+            return;
+        }
+
         if (texture) {
             SDL_DestroyTexture(texture);
+            texture = nullptr;
         }
-        // Recreate the texture with new dimensions
+        // This part needs the 'else' block from the previous suggestion
+        // to correctly include the texture clearing logic.
         texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, w, h);
         if (!texture) {
             std::cerr << "Failed to re-create SDL texture on resize: " << SDL_GetError() << std::endl;
         }
+        // Missing texture clearing logic here
         width = w;
         height = h;
     }
@@ -135,9 +141,7 @@ public:
         return false; // Allow the close event to proceed
     }
 
-    void OnBeforeClose(CefRefPtr<CefBrowser> browser) override {
-        // Nothing specific to do here for this example
-    }
+    void OnBeforeClose(CefRefPtr<CefBrowser> browser) override {}
 
     // CefLoadHandler methods
     void OnLoadEnd(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, int httpStatusCode) override {
@@ -167,7 +171,6 @@ public:
         std::cout << "OnLoadStart()" << std::endl;
     }
 
-    // Custom methods to check application state
     bool closeAllowed() const {
         return closing;
     }
@@ -177,10 +180,10 @@ public:
     }
 
 private:
-    int browser_id = 0; // Initialize to 0
+    int browser_id = 0;
     bool closing = false;
     bool loaded = false;
-    CefRefPtr<CefRenderHandler> handler; // Reference to the render handler
+    CefRefPtr<CefRenderHandler> handler;
 
     IMPLEMENT_REFCOUNTING(BrowserClient);
 };
@@ -193,15 +196,16 @@ public:
     // CefApp methods
     virtual void OnBeforeCommandLineProcessing(const CefString& process_type,
                                                CefRefPtr<CefCommandLine> command_line) override {
-        // This method is called before the command line is processed.
-        // We can add or modify command-line switches here.
         std::cout << "OnBeforeCommandLineProcessing for process type: " << process_type.ToString() << std::endl;
 
         // If the system is locking itself:
         // command_line->AppendSwitch("disable-gpu");
 
         // Hardware acceleration on x11
-        command_line->AppendSwitchWithValue("use-gl", "desktop");
+        command_line->AppendSwitchWithValue("use-gl", "angle");
+
+        // Disable hardware acceleration
+        // command_line->AppendSwitch("disable-gpu");
 
         // Optionally
         command_line->AppendSwitchWithValue("log-file", "cef_debug.log");
@@ -234,10 +238,8 @@ CefBrowserHost::MouseButtonType translateMouseButton(const SDL_MouseButtonEvent&
 }
 
 int main(int argc, char * argv[]) {
-    // Provide CEF with command-line arguments.
     CefMainArgs args(argc, argv);
 
-    // Create an instance of our custom CefApp
     CefRefPtr<SimpleCefApp> app = new SimpleCefApp();
 
     // CEF applications have multiple sub-processes (render, GPU, etc) that share
@@ -250,19 +252,15 @@ int main(int argc, char * argv[]) {
         // The sub-process has completed so return here.
         return result;
     }
-    // If result == -1, we are in the main browser process.
 
-    // Initialize CEF settings
     CefSettings settings;
 
-    // Generate a unique cache path for each instance to avoid singleton errors
-    // and conflicts when running multiple instances concurrently.
-    std::ostringstream cache_path_ss;
-    cache_path_ss << SDL_GetBasePath() << "cef_cache_"
-                  << std::chrono::duration_cast<std::chrono::milliseconds>(
-                         std::chrono::system_clock::now().time_since_epoch()).count()
-                  << "/";
-    CefString(&settings.cache_path) = cache_path_ss.str();
+    std::string base_path_str = SDL_GetBasePath();
+    if (base_path_str.empty()) {
+        std::cerr << "SDL_GetBasePath() returned empty. Cannot set cache path." << std::endl;
+    }
+    std::string cache_dir = base_path_str + "cef_user_data/";
+    CefString(&settings.cache_path) = cache_dir;
 
     // Set paths for CEF resources and locales.
     // SDL_GetBasePath() provides the directory where the executable is located.
@@ -282,7 +280,6 @@ int main(int argc, char * argv[]) {
         return 1; // Indicate an error
     }
 
-    // Initialize SDL
     if (!SDL_Init(SDL_INIT_VIDEO)) {
         SDL_Log("Couldn't initialize SDL: %s", SDL_GetError());
         CefShutdown(); // Ensure CEF is shut down even if SDL fails
@@ -305,32 +302,22 @@ int main(int argc, char * argv[]) {
         auto renderer = SDL_CreateRenderer(window, nullptr);
         if (renderer) {
             SDL_Event e;
-
-            // Create our RenderHandler instance
             CefRefPtr<RenderHandler> renderHandler = new RenderHandler(renderer, width, height);
-
-            // Create our BrowserClient instance, passing the RenderHandler
             CefRefPtr<BrowserClient> browserClient = new BrowserClient(renderHandler);
-
-            // Create CEF browser window
             CefWindowInfo window_info;
             CefBrowserSettings browserSettings;
-
-            // Set browser to be windowless (off-screen)
             window_info.SetAsWindowless(0); // 0 means no transparency (site background color)
 
-            // Create the browser synchronously
             CefRefPtr<CefBrowser> browser = CefBrowserHost::CreateBrowserSync(
                 window_info,
                 browserClient.get(),
-                "https://www.youtube.com/watch?v=l8Imtec4ReQ", // Initial URL
+                "https://google.com", // Initial URL
                 browserSettings,
                 nullptr,
                 nullptr
             );
 
             bool shutdown = false;
-            bool js_executed = false;
 
             // Main application loop
             while (!browserClient->closeAllowed()) {
@@ -354,6 +341,27 @@ int main(int argc, char * argv[]) {
                                 char_event.character = e.text.text[i]; // Assign the character byte
                                 browser->GetHost()->SendKeyEvent(char_event);
                             }
+                            break;
+                        }
+
+                        case SDL_EVENT_KEY_DOWN: {
+                            CefKeyEvent event;
+                            event.modifiers = e.key.mod;
+                            event.windows_key_code = e.key.key;
+
+                            event.type = KEYEVENT_RAWKEYDOWN;
+                            browser->GetHost()->SendKeyEvent(event);
+                            break;
+                        }
+
+                        case SDL_EVENT_KEY_UP: {
+                            CefKeyEvent event;
+                            event.modifiers = e.key.mod;
+                            event.windows_key_code = e.key.key;
+
+                            event.type = KEYEVENT_KEYUP;
+
+                            browser->GetHost()->SendKeyEvent(event);
                             break;
                         }
 
@@ -407,6 +415,7 @@ int main(int argc, char * argv[]) {
                             CefMouseEvent event;
                             event.x = e.button.x;
                             event.y = e.button.y;
+                            browser->GetHost()->SetFocus(true);
                             browser->GetHost()->SendMouseClickEvent(event, translateMouseButton(e.button), false, 1);
                             break;
                         }
@@ -429,39 +438,18 @@ int main(int argc, char * argv[]) {
                     }
                 }
 
-                // Execute JavaScript example once the page is loaded
-                if (!js_executed && browserClient->isLoaded()) {
-                    js_executed = true;
-                    if (browser) {
-                        CefRefPtr<CefFrame> frame = browser->GetMainFrame();
-                        if (frame) {
-                            frame->ExecuteJavaScript("alert('ExecuteJavaScript works!');", frame->GetURL(), 0);
-                        }
-                    }
-                }
-
-                // Let CEF process its internal messages and events
                 CefDoMessageLoopWork();
-
-                // Clear the SDL renderer
                 SDL_RenderClear(renderer);
-
-                // Render the CEF browser's texture to the SDL renderer
                 renderHandler->render();
-
-                // Update the screen
                 SDL_RenderPresent(renderer);
             }
 
-            // Release CEF references before shutdown to ensure proper cleanup
             browser = nullptr;
             browserClient = nullptr;
             renderHandler = nullptr;
 
             // Shut down CEF
             CefShutdown();
-
-            // Destroy SDL renderer
             SDL_DestroyRenderer(renderer);
         } else {
             std::cerr << "Failed to create SDL renderer: " << SDL_GetError() << std::endl;
@@ -470,7 +458,6 @@ int main(int argc, char * argv[]) {
         std::cerr << "Failed to create SDL window: " << SDL_GetError() << std::endl;
     }
 
-    // Destroy SDL window and quit SDL subsystems
     SDL_DestroyWindow(window);
     SDL_Quit();
 
