@@ -18,6 +18,7 @@ public:
         width(w),
         height(h),
         renderer(renderer) {
+            render_if_valid_texture = true;
             // Create an SDL texture to store the browser's pixel data
             texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, w, h);
             if (!texture) {
@@ -49,7 +50,8 @@ public:
         // std::cout << "OnPaint called! Type: " << type << ", Buffer size: " << w * h * 4 << " bytes." << std::endl;
 
         // Copy the browser's pixel buffer to the SDL texture
-        if (w == width && h == height) {
+        if (w == width && h == height) { // Important or segfault will happen
+            render_if_valid_texture = true;
             unsigned char *texture_data = nullptr;
             int texture_pitch = 0;
             size_t bufferSize = static_cast<size_t>(w) * static_cast<size_t>(h) * 4;
@@ -65,21 +67,29 @@ public:
             return;
         }
 
+        render_if_valid_texture = false;
         if (texture) SDL_DestroyTexture(texture);
         texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, w, h);
-        if (!texture) {
+        if (texture) {
+            SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_BLEND);
+        }
+        else {
             std::cerr << "Failed to re-create SDL texture on resize: " << SDL_GetError() << std::endl;
         }
-        SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_BLEND);
 
         width = w;
         height = h;
     }
 
     // Render the CEF texture to the SDL renderer
-    void render() {
-        if (texture) {
+    void render(CefRefPtr<CefBrowser> browser) {
+        if (texture && render_if_valid_texture) { // r_i_v because of distorted texture
             SDL_RenderTexture(renderer, texture, nullptr, nullptr);
+        }
+        else {
+            // Refresh the renderer after window is resized or
+            // window remains black
+            browser->GetHost()->Invalidate(PET_VIEW);
         }
     }
 
@@ -88,6 +98,7 @@ private:
     int height;
     SDL_Renderer *renderer = nullptr;
     SDL_Texture *texture = nullptr;
+    bool render_if_valid_texture;
 
     // Implement CEF reference counting for proper memory management
     IMPLEMENT_REFCOUNTING(RenderHandler);
@@ -148,13 +159,15 @@ public:
     }
 
     void OnLoadingStateChange(CefRefPtr<CefBrowser> browser, bool isLoading, bool canGoBack, bool canGoForward) override {
-        std::cout << "OnLoadingStateChange(isLoading: " << isLoading << ")" << std::endl;
+        // Debug messages:
+        // std::cout << "OnLoadingStateChange(isLoading: " << isLoading << ")" << std::endl;
     }
 
     virtual void OnLoadStart(CefRefPtr<CefBrowser> browser,
                              CefRefPtr<CefFrame> frame,
                              cef_transition_type_t transition_type) override {
-        std::cout << "OnLoadStart()" << std::endl;
+        // Debug messages:
+        // std::cout << "OnLoadStart()" << std::endl;
     }
 
     bool closeAllowed() const {
@@ -223,11 +236,14 @@ CefBrowserHost::MouseButtonType translateMouseButton(const SDL_MouseButtonEvent&
 int main(int argc, char * argv[]) {
     CefRefPtr<SimpleCefApp> app = new SimpleCefApp();
 
+    // Everything before this will be ran many times
     CefMainArgs args(argc, argv);
     auto exitCode = CefExecuteProcess(args, app, nullptr);
     if (exitCode >= 0) {
         return exitCode;
     }
+    int num_logical_cores = SDL_GetNumLogicalCPUCores();
+    std::cout << "Number of logical CPU cores: " << num_logical_cores << std::endl;
 
     CefSettings settings;
 
@@ -287,6 +303,8 @@ int main(int argc, char * argv[]) {
     CefRefPtr<BrowserClient> browserClient = new BrowserClient(renderHandler);
     CefWindowInfo window_info;
     CefBrowserSettings browserSettings;
+    browserSettings.windowless_frame_rate = 60;
+    browserSettings.background_color = 0;
     window_info.SetAsWindowless(0); // 0 means no transparency (site background color)
 
     CefRefPtr<CefBrowser> browser = CefBrowserHost::CreateBrowserSync(
@@ -298,15 +316,12 @@ int main(int argc, char * argv[]) {
         nullptr
     );
 
-    bool shutdown = false;
-
     // Main application loop
     while (!browserClient->closeAllowed()) {
         // Process SDL events
-        while (!shutdown && SDL_PollEvent(&e) != 0) {
+        while (SDL_PollEvent(&e) != 0) {
             switch (e.type) {
                 case SDL_EVENT_QUIT:
-                    shutdown = true;
                     browser->GetHost()->CloseBrowser(false);
                     break;
 
@@ -418,7 +433,7 @@ int main(int argc, char * argv[]) {
         SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
         CefDoMessageLoopWork();
         SDL_RenderClear(renderer);
-        renderHandler->render();
+        renderHandler->render(browser);
         SDL_RenderPresent(renderer);
     }
 
